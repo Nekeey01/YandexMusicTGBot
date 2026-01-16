@@ -101,8 +101,29 @@ def track_display(track) -> str:
     return title
 
 
-def fetch_snapshot(client: Client) -> Dict[str, str]:
-    likes = client.users_likes_tracks()
+def resolve_owner_uid(client: Client) -> Optional[int]:
+    me = getattr(client, "me", None)
+    if callable(me):
+        try:
+            me = me()
+        except Exception:
+            me = None
+
+    account = getattr(me, "account", None)
+    uid = getattr(account, "uid", None)
+    if uid:
+        return int(uid)
+    return None
+
+
+def fetch_snapshot(client: Client, owner_uid: Optional[int] = None) -> Dict[str, str]:
+    if owner_uid is not None:
+        try:
+            likes = client.users_likes_tracks(user_id=owner_uid)
+        except TypeError:
+            likes = client.users_likes_tracks(owner_uid)
+    else:
+        likes = client.users_likes_tracks()
     snap: Dict[str, str] = {}
     for ts in likes:
         tid = ts.track_id
@@ -213,7 +234,13 @@ class MultiWatcher:
                 return
 
             try:
-                prev = fetch_snapshot(client)
+                owner_uid = resolve_owner_uid(client)
+                if owner_uid is None:
+                    raise RuntimeError(
+                        "Не удалось определить ownerUid. Проверьте, что токен получен из music.yandex.ru "
+                        "и принадлежит вашему аккаунту."
+                    )
+                prev = fetch_snapshot(client, owner_uid=owner_uid)
             except Exception as e:
                 self.bot.send_message(chat_id, f"⚠️ [{now_str()}] Не смог снять первичный слепок: {e!r}")
                 self.stop(tg_user_id)
@@ -245,7 +272,7 @@ class MultiWatcher:
                     break
 
                 try:
-                    curr = fetch_snapshot(client)
+                    curr = fetch_snapshot(client, owner_uid=owner_uid)
                 except Exception as e:
                     self.bot.send_message(chat_id_local, f"⚠️ [{now_str()}] Ошибка запроса Яндекс.Музыки: {e!r}")
                     continue

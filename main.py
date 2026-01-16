@@ -101,15 +101,71 @@ def track_display(track) -> str:
     return title
 
 
-def fetch_snapshot(client: Client) -> Dict[str, str]:
-    likes = client.users_likes_tracks()
+def resolve_owner_uid(client: Client) -> Optional[int]:
+    me = getattr(client, "me", None)
+    if callable(me):
+        try:
+            me = me()
+        except Exception:
+            me = None
+
+    account = getattr(me, "account", None)
+    uid = getattr(account, "uid", None)
+    if uid:
+        return int(uid)
+    return None
+
+
+def _fetch_tracks_by_ids(client: Client, track_ids: list) -> Dict[str, str]:
+    if not track_ids:
+        return {}
+
+    # API ожидает список строк вида "<track_id>:<album_id>"
+    ids = [str(track_id) for track_id in track_ids]
+
+    tracks = []
+    try:
+        tracks = client.tracks(ids)
+    except Exception:
+        try:
+            tracks = client.tracks(track_ids=ids)
+        except Exception:
+            return {}
+
+    result: Dict[str, str] = {}
+    for tr in tracks or []:
+        if tr is None:
+            continue
+        tid = getattr(tr, "id", None)
+        album_id = getattr(tr, "album_id", None)
+        if tid is None or album_id is None:
+            continue
+        key = f"{tid}:{album_id}"
+        result[key] = track_display(tr)
+    return result
+
+
+def fetch_snapshot(client: Client, owner_uid: Optional[int] = None) -> Dict[str, str]:
+    if owner_uid is not None:
+        try:
+            likes = client.users_likes_tracks(user_id=owner_uid)
+        except TypeError:
+            likes = client.users_likes_tracks(owner_uid)
+    else:
+        likes = client.users_likes_tracks()
     snap: Dict[str, str] = {}
+    missing_ids = []
     for ts in likes:
         tid = ts.track_id
         if getattr(ts, "track", None) is not None:
             snap[tid] = track_display(ts.track)
         else:
-            snap[tid] = f"<track_id={tid}>"
+            missing_ids.append(tid)
+
+    if missing_ids:
+        resolved = _fetch_tracks_by_ids(client, missing_ids)
+        for tid in missing_ids:
+            snap[tid] = resolved.get(tid, f"<track_id={tid}>")
     return snap
 
 
@@ -213,7 +269,13 @@ class MultiWatcher:
                 return
 
             try:
-                prev = fetch_snapshot(client)
+                owner_uid = resolve_owner_uid(client)
+                if owner_uid is None:
+                    raise RuntimeError(
+                        "Не удалось определить ownerUid. Проверьте, что токен получен из music.yandex.ru "
+                        "и принадлежит вашему аккаунту."
+                    )
+                prev = fetch_snapshot(client, owner_uid=owner_uid)
             except Exception as e:
                 self.bot.send_message(chat_id, f"⚠️ [{now_str()}] Не смог снять первичный слепок: {e!r}")
                 self.stop(tg_user_id)
@@ -245,7 +307,7 @@ class MultiWatcher:
                     break
 
                 try:
-                    curr = fetch_snapshot(client)
+                    curr = fetch_snapshot(client, owner_uid=owner_uid)
                 except Exception as e:
                     self.bot.send_message(chat_id_local, f"⚠️ [{now_str()}] Ошибка запроса Яндекс.Музыки: {e!r}")
                     continue

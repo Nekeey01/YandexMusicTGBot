@@ -116,6 +116,35 @@ def resolve_owner_uid(client: Client) -> Optional[int]:
     return None
 
 
+def _fetch_tracks_by_ids(client: Client, track_ids: list) -> Dict[str, str]:
+    if not track_ids:
+        return {}
+
+    # API ожидает список строк вида "<track_id>:<album_id>"
+    ids = [str(track_id) for track_id in track_ids]
+
+    tracks = []
+    try:
+        tracks = client.tracks(ids)
+    except Exception:
+        try:
+            tracks = client.tracks(track_ids=ids)
+        except Exception:
+            return {}
+
+    result: Dict[str, str] = {}
+    for tr in tracks or []:
+        if tr is None:
+            continue
+        tid = getattr(tr, "id", None)
+        album_id = getattr(tr, "album_id", None)
+        if tid is None or album_id is None:
+            continue
+        key = f"{tid}:{album_id}"
+        result[key] = track_display(tr)
+    return result
+
+
 def fetch_snapshot(client: Client, owner_uid: Optional[int] = None) -> Dict[str, str]:
     if owner_uid is not None:
         try:
@@ -125,12 +154,18 @@ def fetch_snapshot(client: Client, owner_uid: Optional[int] = None) -> Dict[str,
     else:
         likes = client.users_likes_tracks()
     snap: Dict[str, str] = {}
+    missing_ids = []
     for ts in likes:
         tid = ts.track_id
         if getattr(ts, "track", None) is not None:
             snap[tid] = track_display(ts.track)
         else:
-            snap[tid] = f"<track_id={tid}>"
+            missing_ids.append(tid)
+
+    if missing_ids:
+        resolved = _fetch_tracks_by_ids(client, missing_ids)
+        for tid in missing_ids:
+            snap[tid] = resolved.get(tid, f"<track_id={tid}>")
     return snap
 
 

@@ -11,7 +11,7 @@ import telebot
 from yandex_music import Client
 
 
-STATE_FILE = "state.json"
+STATE_FILE = os.getenv("STATE_FILE", "state.json")
 
 # y0__xCUk7a_Ahje-AYg44_tixbO5GnjC0NZ2tNCT9R04rk4dHeTFw
 

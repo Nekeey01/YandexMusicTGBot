@@ -97,7 +97,7 @@ def track_display(track) -> str:
         artists = track.artistsName()
 
     if artists:
-        return f"{artists} — {title}"
+        return f"{", ".join(artists)} — {title}"
     return title
 
 
@@ -133,11 +133,19 @@ def _fetch_tracks_by_ids(client: Client, track_ids: list) -> Dict[str, str]:
             return {}
 
     result: Dict[str, str] = {}
+
+    count = 0
     for tr in tracks or []:
+        if count < 10:
+            count += 1
         if tr is None:
             continue
         tid = getattr(tr, "id", None)
-        album_id = getattr(tr, "album_id", None)
+        albums = getattr(tr, "albums", None)
+        try:
+            album_id = getattr(albums[0], "id", None)
+        except Exception:
+            continue
         if tid is None or album_id is None:
             continue
         key = f"{tid}:{album_id}"
@@ -321,14 +329,13 @@ class MultiWatcher:
                 if not added and not removed:
                     continue
 
-                lines = [f"🎧 [{now_str()}] Изменения в 'Мне нравится':"]
-
-                if added:
-                    lines.append("➕ Добавлено:")
-                    for tid in added[:50]:
-                        lines.append(f"  + {curr.get(tid, tid)}")
-                    if len(added) > 50:
-                        lines.append(f"  …и еще {len(added) - 50}")
+                lines = [f"Изменения в 'Мне нравится':"]
+                # if added:
+                #     lines.append("➕ Добавлено:")
+                #     for tid in added[:50]:
+                #         lines.append(f"  + {curr.get(tid, tid)}")
+                #     if len(added) > 50:
+                #         lines.append(f"  …и еще {len(added) - 50}")
 
                 if removed:
                     lines.append("➖ Удалено:")

@@ -323,10 +323,10 @@ class MultiWatcher:
                 prev_ids = set(prev.keys())
                 curr_ids = set(curr.keys())
 
-                added = sorted(curr_ids - prev_ids)
+                # added = sorted(curr_ids - prev_ids)
                 removed = sorted(prev_ids - curr_ids)
 
-                if not added and not removed:
+                if not removed:
                     continue
 
                 lines = [f"Изменения в 'Мне нравится':"]
@@ -348,7 +348,7 @@ class MultiWatcher:
 
                 with self._lock:
                     u4 = self._ensure_user(tg_user_id)
-                    u4["watch"]["added_count"] += len(added)
+                    # u4["watch"]["added_count"] += len(added)
                     u4["watch"]["removed_count"] += len(removed)
                     u4["snapshot"] = curr
                     save_state(self.state)

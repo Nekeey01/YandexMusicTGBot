@@ -568,18 +568,30 @@ def main():
         safe_send_message(bot, message.chat.id, watcher.stats_text(tg_user_id))
 
     print(f"[{now_str()}] Bot started.")
+    run_polling_forever(bot)
+
+
+import time
+import telebot
+
+def run_polling_forever(bot: telebot.TeleBot) -> None:
+    backoff = 1
     while True:
         try:
             bot.infinity_polling(
-                timeout=60,
-                long_polling_timeout=60,
-                skip_pending=True,
-                allowed_updates=None
+                timeout=30,
+                long_polling_timeout=30,
+                skip_pending=True
             )
+            # Если сюда дошли, polling сам "вышел"
+            print(f"[{now_str()}] infinity_polling exited unexpectedly, restarting…")
+
         except Exception as e:
             print(f"[{now_str()}] polling crashed: {e!r}")
-            time.sleep(5)
 
+        # экспоненциальная пауза (1,2,4,8… максимум 60 сек)
+        time.sleep(backoff)
+        backoff = min(backoff * 2, 60)
 
 if __name__ == "__main__":
     main()

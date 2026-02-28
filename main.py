@@ -48,8 +48,9 @@ def safe_send_message(bot, chat_id: int, text: str, **kwargs) -> bool:
             # 403/400 и т.п. обычно не лечатся ретраями (бот заблокирован, чат недоступен)
             return False
 
-        except Exception:
+        except Exception as e:
             # Таймауты/сетевые ошибки requests и прочее
+            print(f"Another error: {e}")
             delay = base_delay * (2 ** (attempt - 1)) + random.random()
             time.sleep(min(delay, 30))
             continue
@@ -299,8 +300,11 @@ class MultiWatcher:
             if not ym_token:
                 return False, "Нет YM_TOKEN. Пришли: /settoken <токен>"
 
+            # if u["watch"].get("is_running"):
+            #     return True, "Мониторинг уже запущен."
+
             if u["watch"].get("is_running"):
-                return True, "Мониторинг уже запущен."
+                return True, "Мониторинг перезапускается."
 
             u["watch"]["is_running"] = True
             u["watch"]["started_at_ts"] = utc_ts()
@@ -540,6 +544,9 @@ def main():
         watcher.set_chat_id(tg_user_id, message.chat.id)
 
         ok, msg = watcher.start(tg_user_id)
+        if ok:
+            watcher.stop(tg_user_id)
+            watcher.start(tg_user_id)
         safe_send_message(bot,message.chat.id, ("✅ " if ok else "❌ ") + msg)
 
     @bot.message_handler(commands=["stop"])

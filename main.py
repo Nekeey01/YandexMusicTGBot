@@ -10,6 +10,51 @@ from dotenv import load_dotenv
 import telebot
 from yandex_music import Client
 
+import time
+import random
+from telebot.apihelper import ApiTelegramException
+
+def safe_send_message(bot, chat_id: int, text: str, **kwargs) -> bool:
+    """
+    Надежная отправка: переживает 502/429/таймауты.
+    Возвращает True если доставлено, False если нет.
+    """
+    max_attempts = 6
+    base_delay = 1.0
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            bot.send_message(chat_id, text, **kwargs)
+            return True
+
+        except ApiTelegramException as e:
+            # e.error_code есть почти всегда
+            code = getattr(e, "error_code", None)
+
+            # 502/500/503/504: временные серверные/сетевые штуки
+            if code in (500, 502, 503, 504):
+                delay = base_delay * (2 ** (attempt - 1)) + random.random()
+                time.sleep(min(delay, 30))
+                continue
+
+            # 429 Too Many Requests: Telegram просит подождать
+            if code == 429:
+                # иногда telegram кладёт retry_after в json, но telebot не всегда удобно отдаёт
+                # поэтому ждём экспоненциально
+                delay = base_delay * (2 ** (attempt - 1)) + random.random()
+                time.sleep(min(delay, 60))
+                continue
+
+            # 403/400 и т.п. обычно не лечатся ретраями (бот заблокирован, чат недоступен)
+            return False
+
+        except Exception:
+            # Таймауты/сетевые ошибки requests и прочее
+            delay = base_delay * (2 ** (attempt - 1)) + random.random()
+            time.sleep(min(delay, 30))
+            continue
+
+    return False
 
 STATE_FILE = os.getenv("STATE_FILE", "state.json")
 
@@ -272,7 +317,7 @@ class MultiWatcher:
             try:
                 client = Client(ym_token).init()
             except Exception as e:
-                self.bot.send_message(chat_id, f"⚠️ [{now_str()}] Не смог инициализировать Я.Музыку: {e!r}")
+                safe_send_message(self.bot, chat_id, f"⚠️ [{now_str()}] Не смог инициализировать Я.Музыку: {e!r}")
                 self.stop(tg_user_id)
                 return
 
@@ -285,7 +330,7 @@ class MultiWatcher:
                     )
                 prev = fetch_snapshot(client, owner_uid=owner_uid)
             except Exception as e:
-                self.bot.send_message(chat_id, f"⚠️ [{now_str()}] Не смог снять первичный слепок: {e!r}")
+                safe_send_message(self.bot, chat_id, f"⚠️ [{now_str()}] Не смог снять первичный слепок: {e!r}")
                 self.stop(tg_user_id)
                 return
 
@@ -294,7 +339,8 @@ class MultiWatcher:
                 u2["snapshot"] = prev
                 save_state(self.state)
 
-            self.bot.send_message(
+            safe_send_message(
+                self.bot,
                 chat_id,
                 f"✅ [{now_str()}] Мониторинг запущен.\n"
                 f"- Треков в 'Мне нравится': {len(prev)}\n"
@@ -317,7 +363,7 @@ class MultiWatcher:
                 try:
                     curr = fetch_snapshot(client, owner_uid=owner_uid)
                 except Exception as e:
-                    self.bot.send_message(chat_id_local, f"⚠️ [{now_str()}] Ошибка запроса Яндекс.Музыки: {e!r}")
+                    safe_send_message(self.bot,chat_id_local, f"⚠️ [{now_str()}] Ошибка запроса Яндекс.Музыки: {e!r}")
                     continue
 
                 prev_ids = set(prev.keys())
@@ -344,7 +390,7 @@ class MultiWatcher:
                     if len(removed) > 50:
                         lines.append(f"  …и еще {len(removed) - 50}")
 
-                self.bot.send_message(chat_id_local, "\n".join(lines))
+                safe_send_message(self.bot,chat_id_local, "\n".join(lines))
 
                 with self._lock:
                     u4 = self._ensure_user(tg_user_id)
@@ -433,7 +479,8 @@ def main():
         tg_user_id = str(message.from_user.id)
         watcher.set_chat_id(tg_user_id, message.chat.id)
 
-        bot.send_message(
+        safe_send_message(
+            bot,
             message.chat.id,
             "👋 Я мониторю 'Мне нравится' в Яндекс.Музыке.\n\n"
             "Команды:\n"
@@ -452,12 +499,12 @@ def main():
 
         parts = message.text.split(maxsplit=1)
         if len(parts) < 2 or not parts[1].strip():
-            bot.send_message(message.chat.id, "Формат: /settoken <YM_TOKEN>")
+            safe_send_message(bot, message.chat.id, "Формат: /settoken <YM_TOKEN>")
             return
 
         ym_token = parts[1].strip()
         watcher.set_token(tg_user_id, ym_token)
-        bot.send_message(message.chat.id, "✅ Токен сохранен. Теперь можно /watch")
+        safe_send_message(bot, message.chat.id, "✅ Токен сохранен. Теперь можно /watch")
 
     @bot.message_handler(commands=["setinterval"])
     def on_setinterval(message):
@@ -466,7 +513,7 @@ def main():
 
         parts = message.text.split(maxsplit=1)
         if len(parts) < 2 or not parts[1].strip():
-            bot.send_message(
+            safe_send_message(bot,
                 message.chat.id,
                 "Формат: /setinterval <30s|1m|1d|300>\n"
                 "Примеры: /setinterval 30s, /setinterval 1m, /setinterval 86400"
@@ -478,10 +525,10 @@ def main():
             secs = parse_interval_to_seconds(raw)
             watcher.set_interval(tg_user_id, secs)
         except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Не получилось: {e}")
+            safe_send_message(bot,message.chat.id, f"❌ Не получилось: {e}")
             return
 
-        bot.send_message(
+        safe_send_message(bot,
             message.chat.id,
             f"✅ Интервал обновлен: {fmt_interval(watcher.get_interval(tg_user_id))}\n"
             "Если мониторинг уже запущен, изменения применятся на следующем цикле."
@@ -493,28 +540,38 @@ def main():
         watcher.set_chat_id(tg_user_id, message.chat.id)
 
         ok, msg = watcher.start(tg_user_id)
-        bot.send_message(message.chat.id, ("✅ " if ok else "❌ ") + msg)
+        safe_send_message(bot,message.chat.id, ("✅ " if ok else "❌ ") + msg)
 
     @bot.message_handler(commands=["stop"])
     def on_stop(message):
         tg_user_id = str(message.from_user.id)
         watcher.stop(tg_user_id)
-        bot.send_message(message.chat.id, "🛑 Остановил мониторинг для тебя.")
+        safe_send_message(bot, message.chat.id, "🛑 Остановил мониторинг для тебя.")
 
     @bot.message_handler(commands=["status"])
     def on_status(message):
         tg_user_id = str(message.from_user.id)
         watcher.set_chat_id(tg_user_id, message.chat.id)
-        bot.send_message(message.chat.id, watcher.status_text(tg_user_id))
+        safe_send_message(bot, message.chat.id, watcher.status_text(tg_user_id))
 
     @bot.message_handler(commands=["stats"])
     def on_stats(message):
         tg_user_id = str(message.from_user.id)
         watcher.set_chat_id(tg_user_id, message.chat.id)
-        bot.send_message(message.chat.id, watcher.stats_text(tg_user_id))
+        safe_send_message(bot, message.chat.id, watcher.stats_text(tg_user_id))
 
     print(f"[{now_str()}] Bot started.")
-    bot.infinity_polling(timeout=30, long_polling_timeout=30)
+    while True:
+        try:
+            bot.infinity_polling(
+                timeout=60,
+                long_polling_timeout=60,
+                skip_pending=True,
+                allowed_updates=None
+            )
+        except Exception as e:
+            print(f"[{now_str()}] polling crashed: {e!r}")
+            time.sleep(5)
 
 
 if __name__ == "__main__":

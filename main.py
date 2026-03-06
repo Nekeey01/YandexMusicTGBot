@@ -544,7 +544,7 @@ def main():
         watcher.set_chat_id(tg_user_id, message.chat.id)
 
         ok, msg = watcher.start(tg_user_id)
-        if ok:
+        if ok and msg[0:9] != 'Запустил.':
             watcher.stop(tg_user_id)
             watcher.start(tg_user_id)
         safe_send_message(bot,message.chat.id, ("✅ " if ok else "❌ ") + msg)
